@@ -1,0 +1,273 @@
+---
+title: "BIOEE 4751: eBird Status & Trends"
+author: Matt Strimas-Mackey & Tom Auer
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, 
+                      message = FALSE,
+                      collapse = TRUE,
+                      comment = "#>",
+                      out.width = "\\textwidth", 
+                      fig.height = 5, 
+                      fig.width = 7, 
+                      fig.align = "center")
+```
+
+[eBird Status and Trends](https://ebird.org/science/status-and-trends) links bird sightings from hundreds of thousands of [eBirders](https://ebird.org) with habitat information from satellites to create predictions of the broad scale patterns of distribution and abundance of bird species. These products allow us to explore movements, range boundaries, and the spatiotemporal pattern of abundance for over 600 North American birds across the entire Western Hemisphere at high spatial and temporal resolution. In addition to exploring the various Status and Trends products through the website, the underlying data are available for download and analysis in R.
+
+In this lab, we'll learn how to access, analyze, and visualize the Status and Trends data within R using the package [`ebirdst`](https://cornelllabofornithology.github.io/ebirdst/). As an example, we'll focus on the [Baltimore Oriole](https://www.allaboutbirds.org/guide/Baltimore_Oriole/), a familiar songbird that breeds in open woodlands throughout the Northeastern United States. Start by opening the [Status and Trends page for Baltimore Oriole](https://ebird.org/science/status-and-trends/balori) and explore the products that are available, paying particular attention to the weekly abundance animation and the seasonal abundance maps.
+
+Now that you're familiar with the products available through Status and Trends, let's dive into the raw data! We'll start by learning how to download the data, then we'll produce maps of occurrence and abundance for a given week.
+
+## Setup
+
+Before we dive into the material, there's some setup that needs to be done to ensure we have all the necessary tools. First, [install R](https://cloud.r-project.org/) and [RStudio](https://rstudio.com/products/rstudio/download/#download), which we'll be using to interact with R. It's important to have the most recent versions of both R and RStudio, so if you haven't installed or updated them within the last 6 months, re-install them now. Next, open RStudio and install the following add on R packages that provide additional functionality not included in base R, you only need to run this line of code once:
+
+```{r install-packages, eval = FALSE}
+install.packages("remotes")
+remotes::install_github(c("CornellLabofOrnithology/ebirdst",
+                          "ropensci/rnaturalearth",
+                          "ropensci/rnaturalearthdata"))
+```
+
+## Download data
+
+The Status and Trends website is a great resources for exploring patterns of bird movement throughout North America, but if we want to make custom visualizations or perform analyses we'll need to access the data underlying the Status and Trends products. Fortunately, all this raw data is stored in the cloud on the [Amazon Web Services Registry of Open Data](https://registry.opendata.aws/ebirdst/) and the R package `ebirdst` gives you access to these data. To see a list of all the species available through `ebirdst` you can explore the `ebirdst_runs` data frame. Before doing so, we'll need to attach the add on R packages that we'll be using throughout this lab using the `library()` command.
+
+```{r dl-runs}
+library(raster)
+library(sf)
+library(rnaturalearth)
+library(dplyr)
+library(scales)
+library(ebirdst)
+
+glimpse(ebirdst_runs)
+```
+
+You can run `View(ebirdst_runs)` to explore this table interacticely within RStudio. The function `ebirdst_download()` downloads data for a single species; all you need to provide is the name of the species. 
+
+```{r dl-dl, eval = FALSE}
+species <- "Baltimore Oriole"
+dl_path <- ebirdst_download(species)
+```
+
+```{r dl-path, echo = FALSE}
+species <- "Baltimore Oriole"
+dl_path <- get_species_path(species)
+```
+
+The variable `dl_path` now contains the location on your computer where the data were downloaded to. By default, all Status and Trends data are downloaded to a special directory buried within your file system. This is done by design because it's critical that you don't change the file structure of the downloaded data package otherwise `ebirdst` won't be able to work with the data; however, you can use `print(dl_path)` to see where the files are.
+
+Let's use `list.files()` to see what files were downloaded:
+
+```{r dl-ls}
+list.files(dl_path, recursive = TRUE)
+```
+
+Notice that most of these files end in `.tif`. These are GeoTIFFs, which is the most widespread format for storing spatial raster data, i.e. where space is divided up into a regular grid of cells each of which is assigned some quantity such as abundance. The [`ebirdst` website](https://cornelllabofornithology.github.io/ebirdst/articles/ebirdst-introduction.html#raster-layer-description) contains a desciption of what data each of the files contains.
+
+## Loading data into R
+
+Now that we've downloaded the Baltimore Oriole data, let's load some into our R session so we can work with it. The R package `raster` provides tools for working with raster data of the form stored in the GeoTIFFs we just downloaded. The `ebirdst` function `load_raster()` loads one of the GeoTIFFs into an object the `raster` package can work with. For example, to load the weekly abundance and occurrence data, we can use:
+
+```{r load-weekly}
+occ <- load_raster("occurrence", path = dl_path)
+abd <- load_raster("abundance", path = dl_path)
+```
+
+The **occurrence** layer represents the expected probability of occurrence of the species, ranging from 0 to 1, on an eBird Traveling Count by a skilled eBirder starting at the optimal time of day with the optimal search duration and distance that maximizes detection of that species in a region. The abundance layer represents the expected relative abundance of Baltimore Orioles on an similarly optimal eBird Traveling Count. The `abd` and `occ` variables store `RasterStack` objects and we can use some functions from the `raster` package to get information about them. Specifically, note that the size of each cell (aka the resolution) is 2.96 km (2,962 m) and that there are 52 layers in each `RasterStack` corresponding to the estimates of abundance and occurrence for each of the 52 weeks of the year.
+
+```{r load-info}
+res(abd)
+nlayers(abd)
+```
+
+The `ebirdst` function `parse_raster_dates()` gives us the mid point of the week that each layer in the `RasterStack` corresponds to.
+
+```{r load-dates}
+parse_raster_dates(abd)
+```
+
+When you explored the Status and Trends website you likely saw static [seasonal abundance maps](https://ebird.org/science/status-and-trends/balori/abundance-map) in addition to the animated weekly maps. These seasonal maps are created by taking the average of the weekly layers for all weeks within the given season (e.g. "breeding"), where the date boundaries of the season are defined through a process of expert review. The raw data underlying these seasonal maps is also contained within the downloaded data. Load the seasonal data now with:
+
+```{r load-seasonal}
+abd_seasonal <- load_raster("abundance_seasonal", path = dl_path)
+# the season that each layer corresponds to can be accessed with
+names(abd_seasonal)
+```
+
+## Mapping occurrence and abundance
+
+Let's start by mapping some of these data! We'll pick a week and produce maps comparing the occurrence and abundance of Baltimore Oriole for this week. For the sake of this example, we'll choose the week centered on June 14 (week 24), which is during the breeding season for Baltimore Oriole.
+
+```{r occabd-week}
+# identify which layer our focal week corresponds to
+week_date <- as.Date("2018-06-14")
+week_index <- which(parse_raster_dates(abd) == week_date)
+week_index
+```
+
+We can map a quick map of the abundance data using the `plot()` function from the `raster` package.
+
+```{r occabd-quick}
+plot(abd[[week_index]])
+```
+
+Ok, so we have a map, but it's not very useful. It's clear that to make a good map there's some data preparation that needs to be done. Specifically,
+
+1. All Status and Trends data are provided for the whole Western Hemisphere, but for any given week most of the mapped area will be have a predicted occurrence of zero (light grey on the above map). The `ebirdst` function `calc_full_extent()` calculates the extent of the non-zero data, which we can then use to focus our maps.
+2. You may notice the shape of the continents in the above map looks a little "weird". That's because the Status and Trends data are provided in the sinusoidal equal area [projection](https://en.wikipedia.org/wiki/Map_projection) used by the underlying environmental predictor data. This projection is valid for the whole globe and for most analytical uses it functions well; however, it's heavily distorted and when producing maps there are much better options. Fortunately, as part of the Status and Trends process an optimal projection for mapping each species is calculated and made available through the function `load_fac_map_parameters()`.
+3. By default, `plot()` assigns colors to the data using linear bins; however, the abundance data in particular is heavily left skewed, and linear bins usually result is a loss of resoluton in the pattern of abundance. Quantile bins, which each have an equal number of observations, are typically a much better choice than linear bins, which are all of equal size. The `ebirdst` function `calc_bins()` calculates quantile bins for Status and Trends data.
+
+The following code performs these data preparation steps.
+
+```{r occabd-prep}
+# get species-specific map projection and full annual cycle extent
+map_pars <- load_fac_map_parameters(dl_path)
+proj <- map_pars$custom_projection
+fac_ext <- map_pars$fa_extent_sinu
+
+# project the abundance and occurrence data for the given week
+# crop to the pre-calculated full annual extent to speed up projection
+occ_proj <- occ[[week_index]] %>% 
+  crop(fac_ext + 5e5) %>% 
+  projectRaster(crs = proj, method = "ngb")
+abd_proj <- abd[[week_index]] %>% 
+  crop(fac_ext + 5e5) %>% 
+  projectRaster(crs = proj, method = "ngb")
+
+# determine non-zero extent for the focal week
+week_ext <- calc_full_extent(occ_proj)
+
+# calculate quantile bins
+occ_bins <- calc_bins(occ_proj, method = "quantile")$bins
+abd_bins <- calc_bins(abd_proj, method = "quantile")$bins
+```
+
+We can now make a much improved version of the map. Note that the below map uses the color palette from the online Status and Trends maps, accessed via `abundance_palette()`, which is much better than the default palette used by `raster`. Again, we'll only map the abundance data for now.
+
+```{r abdocc-pres}
+par(mar = c(0.25, 0.25, 0.25, 0.5))
+pal <- abundance_palette(n = length(abd_bins) - 1)
+plot(abd_proj, 
+     breaks = abd_bins, col = pal,
+     maxpixels = ncell(abd_proj),
+     ext = week_ext,
+     axes = FALSE)
+```
+
+This looks much better, but note that this map only show the relative abundance within areas where Baltimore Orioles are predicted to occur. The Status and Trends models also make predictions for where the species is absent and it will be valuable to also show this information. In addition, the data layers make a distinction between areas where the species is predicted to be absent (cell values of 0) and areas where no prediction was made because there wasn't enough data to fit the model (cell values of NA). The predicted zeros were hidden in the above map because `abd_bins` starts at the lowest *non-zero* value. We can show these predicted zeros by adding an additional bin to capture zero, which we'll assign to grey in the color palettes.
+
+```{r abdocc-zero}
+# extend bins
+occ_bins_z <- c(0, occ_bins)
+abd_bins_z <- c(0, abd_bins)
+# add grey to palette
+pal_z <- c("#e6e6e6", pal)
+
+# produce map
+par(mar = c(0.25, 0.25, 1.5, 0.5))
+title <- paste0("Relative Abundance\n", species, 
+               ", ", format(week_date, "%b %d"))
+plot(abd_proj, 
+     breaks = abd_bins_z, col = pal_z, 
+     # only show 3 decimals of precision in legend
+     lab.breaks = comma(abd_bins_z, 0.001),
+     maxpixels = ncell(abd_proj),
+     ext = week_ext,
+     main = title, cex.main = 1,
+     axes = FALSE, box = FALSE)
+```
+
+Looks great! The final step is to add some contextual information: state borders, country borders, and a background layer showing the land to show regions where no prediction was made. We can get all these layers from [Natural Earth](https://www.naturalearthdata.com/), which provides excellent free GIS data, via the R package `rnaturalearth`. Unlike the Status and Trends data, which is in raster format, these borders are in the form of spatial lines and polygons, which we can work with using the `sf` package in R. Let's load these data now. There's some processing of these spatial layers below that may look cryptic if you're not familiar with the `sf` package, don't worry too much about the details. If you are interested in working with spatial data in R, the free online book [Geocomputation with R](https://bookdown.org/robinlovelace/geocompr/) is an excellent resources.
+
+```{r abdocc-ne, results = "hide"}
+# north american land boundary
+ne_land <- ne_countries(scale = 50, returnclass = "sf") %>% 
+  filter(continent == "North America") %>% 
+  # combine all countries together
+  st_set_precision(1e6) %>%
+  st_union()
+
+# country lines
+ne_country_lines <- ne_download(scale = 50, category = "cultural",
+                                type = "admin_0_boundary_lines_land",
+                                returnclass = "sf")
+# subset to only retain the lines within north america
+in_na <- as.logical(st_intersects(ne_country_lines, ne_land, sparse = FALSE))
+ne_country_lines <- ne_country_lines[in_na, ]
+
+# state lines
+ne_state_lines <- ne_download(scale = 50, category = "cultural",
+                              type = "admin_1_states_provinces_lines",
+                              returnclass = "sf")
+# subset to only retain the lines within north america
+in_na <- as.logical(st_intersects(ne_state_lines, ne_land, sparse = FALSE))
+ne_state_lines <- ne_state_lines[in_na, ]
+
+# project to match rasters
+ne_land <- st_transform(ne_land, crs = proj)
+ne_country_lines <- st_transform(ne_country_lines, crs = proj)
+ne_state_lines <- st_transform(ne_state_lines, crs = proj)
+```
+
+Now we can make the final maps, building up the different components in layers with multiple calls to `plot()`. At this stage we'll make occurrence and abundance maps so we can compare them. You'll notice there's some additional code below to produce legends, this is necessary because we're using quantile bins and we just wnat to show the minimum, maximum, and midpoint on the color bar.
+
+```{r abdocc-final, fig.height = 10}
+par(mar = c(0.25, 0.25, 2, 0.25), mfrow = c(2, 1))
+
+# abundance map
+title <- paste0(species, ", ", format(week_date, "%b %d"), "\n",
+                "Relative Abundance")
+# creat a blank plot
+plot(week_ext, col = NA, axes = FALSE,
+     main = title, cex.main = 1)
+# add land background/area of no prediction
+plot(ne_land, col = "#cfcfcf", border = NA, add = TRUE)
+# add abundance data including predicted zeros
+plot(abd_proj, 
+     breaks = abd_bins_z, col = pal_z,
+     maxpixels = ncell(abd_proj),
+     legend = FALSE, add = TRUE)
+# country and state boundaries
+plot(ne_state_lines, col = "white", lwd = 0.7, add = TRUE)
+plot(ne_country_lines, col = "white", lwd = 1.2, add = TRUE)
+
+# legend
+lbl_brks <- seq(0, max(abd_bins), length.out = length(abd_bins_z))
+lbls_at <- c(0, quantile(lbl_brks[-1], c(0, 0.5, 1)))
+lbls <- comma(lbls_at, accuracy = 0.001)
+plot(abd_proj, legend.only = TRUE,
+     breaks = lbl_brks, col = pal_z,
+     smallplot = c(0.88, 0.90, 0.15, 0.85),
+     axis.args = list(at = lbls_at, labels = lbls))
+
+# occurrence map
+# creat a blank plot
+plot(week_ext, col = NA, axes = FALSE,
+     main = "Ocurrence", cex.main = 1)
+# add land background/area of no prediction
+plot(ne_land, col = "#cfcfcf", border = NA, add = TRUE)
+# add occurrence data including predicted zeros
+plot(occ_proj, 
+     breaks = occ_bins_z, col = pal_z,
+     maxpixels = ncell(occ_proj),
+     legend = FALSE, add = TRUE)
+# country and state boundaries
+plot(ne_state_lines, col = "white", lwd = 0.7, add = TRUE)
+plot(ne_country_lines, col = "white", lwd = 1.2, add = TRUE)
+
+# legend
+lbl_brks <- seq(0, max(occ_bins), length.out = length(occ_bins_z))
+lbls_at <- c(0, quantile(lbl_brks[-1], c(0, 0.5, 1)))
+lbls <- comma(lbls_at, accuracy = 0.001)
+plot(occ_proj, legend.only = TRUE,
+     breaks = lbl_brks, col = pal_z,
+     smallplot = c(0.88, 0.90, 0.15, 0.85),
+     axis.args = list(at = lbls_at, labels = lbls))
+```
