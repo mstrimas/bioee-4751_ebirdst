@@ -27,13 +27,11 @@ Now that you're familiar with the products available through Status and Trends, 
 
 ## Setup
 
-Before we dive into the material, there's some setup that needs to be done to ensure we have all the necessary tools. First, [install R](https://cloud.r-project.org/) and [RStudio](https://rstudio.com/products/rstudio/download/#download), which we'll be using to interact with R. It's important to have the most recent versions of both R and RStudio, so if you haven't installed or updated them within the last 6 months, re-install them now. Next, open RStudio and install the following add on R packages that provide additional functionality not included in base R, you only need to run this line of code once:
+Before we dive into the material, there's some setup that needs to be done to ensure we have all the necessary tools. First, [install R](https://cloud.r-project.org/) and [RStudio](https://rstudio.com/products/rstudio/download/#download), which we'll be using to interact with R. It's important to have the most recent versions of both R and RStudio, so if you haven't installed or updated them within the last 6 months, re-install them now. Next, open RStudio and run the following code to install the add on R packages required for this lab, you only need to run this line of code once:
 
 ```{r install-packages, eval = FALSE}
 install.packages("remotes")
-remotes::install_github(c("CornellLabofOrnithology/ebirdst",
-                          "ropensci/rnaturalearth",
-                          "ropensci/rnaturalearthdata"))
+remotes::install_github("CornellLabofOrnithology/ebirdst")
 ```
 
 To get started with this lab, open up RStudio and create a new project from the File menu. This will create a new directory on your commputer in which will contain your code and data for this project. Create a new R script (File > New File) to contain all the code in this lab and save it in your project directory. Finally, download [this file of GIS data](https://github.com/mstrimas/bioee-4751_ebirdst/raw/master/data/gis-data.gpkg), which contains some contextual gis layers that we'll use when making maps. Place this file in a `data/` subdirectory of your project.
@@ -47,6 +45,7 @@ library(raster)
 library(sf)
 library(dplyr)
 library(scales)
+library(ggplot2)
 library(ebirdst)
 
 glimpse(ebirdst_runs)
@@ -133,25 +132,25 @@ The following code performs these data preparation steps.
 # get species-specific map projection and full annual cycle extent
 map_pars <- load_fac_map_parameters(dl_path)
 proj <- map_pars$custom_projection
-fac_ext <- map_pars$fa_extent_sinu
-
-# project the abundance and occurrence data for the given week
-# crop to the pre-calculated full annual extent to speed up projection
-occ_proj <- occ[[week_index]] %>% 
-  crop(fac_ext + 5e5) %>% 
-  projectRaster(crs = proj, method = "ngb")
-abd_proj <- abd[[week_index]] %>% 
-  crop(fac_ext + 5e5) %>% 
-  projectRaster(crs = proj, method = "ngb")
-
-# determine non-zero extent for the focal week
-week_ext <- calc_full_extent(occ_proj)
+fac_ext <- map_pars$fa_extent
 # generate a spatial polygon of the extent
-week_ext_sf <- week_ext %>% 
+fac_ext_sf <- fac_ext %>% 
   as("SpatialPolygons") %>% 
   st_as_sf() %>% 
   st_set_crs(proj) %>% 
   st_geometry()
+
+# project the abundance and occurrence data for the given week
+# crop to the pre-calculated full annual extent to speed up projection
+occ_proj <- occ[[week_index]] %>% 
+  crop(map_pars$fa_extent_sinu + 2e6) %>% 
+  projectRaster(crs = proj, method = "ngb")
+abd_proj <- abd[[week_index]] %>% 
+  crop(map_pars$fa_extent_sinu + 2e6) %>% 
+  projectRaster(crs = proj, method = "ngb")
+
+# determine non-zero extent for the focal week
+week_ext <- calc_full_extent(occ_proj)
 
 # calculate quantile bins
 occ_bins <- calc_bins(occ_proj, method = "quantile")$bins
@@ -200,28 +199,27 @@ The GIS data are provided for the whole earth and we'll need to crop them to the
 ```{r abdocc-ne, results = "hide"}
 f_gis <- "data/gis-data.gpkg"
 # create a polygon to crop the gis data to
-week_ext_ll <- week_ext_sf %>% 
-  # buffer by 1000 km
-  st_buffer(1e6) %>% 
+fac_ext_ll <- fac_ext_sf %>% 
   # tranform to lat-lon to match gis layers
-  st_transform(crs = 4326)
+  st_transform(crs = 4326) %>% 
+  # buffer by ~ 3000 km
+  st_buffer(30)
 
 # western hemisphere land boundary
 ne_land <- read_sf(f_gis, "ne_land") %>% 
-  # crop to non-zero extent
-  st_intersection(week_ext_ll) %>% 
+  # crop to full annual cycle non-zero extent
+  st_crop(fac_ext_ll) %>% 
   # transform to custom projection
   st_transform(crs = proj) %>% 
   st_geometry()
-
 # country lines
 ne_country_lines <- read_sf(f_gis, "ne_country_lines") %>% 
-  st_intersection(week_ext_ll) %>% 
+  #st_intersection(fac_ext_ll) %>% 
   st_transform(crs = proj)
 
 # state lines
 ne_state_lines <- read_sf(f_gis, "ne_state_lines") %>% 
-  st_intersection(week_ext_ll) %>% 
+  #st_intersection(fac_ext_ll) %>% 
   st_transform(crs = proj)
 ```
 
@@ -249,13 +247,14 @@ plot(ne_country_lines, col = "white", lwd = 1.2, add = TRUE)
 # legend
 lbl_brks <- seq(0, max(abd_bins), length.out = length(abd_bins_z))
 lbls_at <- c(0, quantile(lbl_brks[-1], c(0, 0.5, 1)))
-lbls <- comma(lbls_at, accuracy = 0.001)
+lbls <- comma(c(0, quantile(abd_bins, c(0, 0.5, 1))), accuracy = 0.001)
 plot(abd_proj, legend.only = TRUE,
      breaks = lbl_brks, col = pal_z,
      smallplot = c(0.88, 0.90, 0.15, 0.85),
      axis.args = list(at = lbls_at, labels = lbls))
 
 # occurrence map
+par(mar = c(0.25, 0.25, 1, 0.25))
 # add land background/area of no prediction
 plot(ne_land, col = "#cfcfcf", border = FALSE,
      main = "Occurrence", cex.main = 1,
@@ -272,9 +271,122 @@ plot(ne_country_lines, col = "white", lwd = 1.2, add = TRUE)
 # legend
 lbl_brks <- seq(0, max(occ_bins), length.out = length(occ_bins_z))
 lbls_at <- c(0, quantile(lbl_brks[-1], c(0, 0.5, 1)))
-lbls <- comma(lbls_at, accuracy = 0.001)
+lbls <- comma(c(0, quantile(occ_bins, c(0, 0.5, 1))), accuracy = 0.001)
 plot(occ_proj, legend.only = TRUE,
      breaks = lbl_brks, col = pal_z,
      smallplot = c(0.88, 0.90, 0.15, 0.85),
+     axis.args = list(at = lbls_at, labels = lbls))
+```
+
+## Abundance trajectories
+
+The above maps visualize a single week of data across the whole range of the species. Alternatively, we can visualize all 52 weeks of data for a single location to examine the phenology of this species. We often call these plots *trajectories*, and they show how abundance changes over the course of the year at a location.
+
+For this example, we'll take Cornell campus (42.448 N, 76.483 W) as our location of interest. We need to convert the latitude and longitude to spatial features, then we can use the `extract()` function from `raster` to extract the the values for all the weeks from the raster layers at the given point. Finally, we're going to use some new data that we haven't worked with before: the upper and lower confidence limits on the abudance estimates. Specifically, `abundance_lower` and `abundance_upper` are the 10th and 90th quantile of the expected relative abundance estimates, respectively. This will give us a sense of the uncertainty in the abundance estimates.
+
+```{r traj-extract}
+# create a point for cornell campus
+pt <- st_point(c(-76.483, 42.448)) %>% 
+  st_sfc(crs = 4326) %>%
+  # transform to raster projection
+  st_transform(crs = projection(abd)) %>% 
+  as_Spatial()
+
+# load uncertainty layers
+abd_lower <- load_raster("abundance_lower", dl_path)
+abd_upper <- load_raster("abundance_upper", dl_path)
+
+# extract weeekly occurrence and abundance values
+abd_traj <- extract(abd, pt)[1, ]
+lower_traj <- extract(abd_lower, pt)[1, ]
+upper_traj <- extract(abd_upper, pt)[1, ]
+```
+
+Now that we've extract the data, let's plot them with `ggplot2`.
+
+```{r traj-plot}
+# create a data frame of extract values
+week_data <- data.frame(week = parse_raster_dates(abd),
+                        abd = unname(abd_traj),
+                        lower = lower_traj,
+                        upper = upper_traj)
+
+# plot
+ggplot(week_data) +
+  aes(x = week, y = abd, ymin = lower, ymax = upper) +
+  geom_ribbon(fill = "grey70") +
+  geom_line() +
+  labs(x = "Week", y = "Relative Abundance") +
+  scale_x_date(date_labels = "%b")
+```
+
+## Seasonal abundance
+
+For the final exercise, we'll map relative abundance during the breeding and non-breeding season. We already loaded this data at the start of the lab. As with the weekly data, we need to do some preparation before we can make a map.
+
+```{r seasonal-prep}
+# project layers
+abd_seasonal_proj <- abd_seasonal[[c("breeding", "nonbreeding")]] %>% 
+  crop(map_pars$fa_extent_sinu + 2e6) %>% 
+  projectRaster(crs = proj, method = "ngb")
+
+# get precalculated bins from load_fac_map_parameters()
+bins_seasonal <- map_pars$abundance_bins
+# add zero to show it in grey
+bins_seasonal <- c(0, bins_seasonal)
+# s&t color palette
+pal_seasonal <- abundance_palette(n = length(bins_seasonal) - 1)
+# add grey for zero
+pal_seasonal <- c("#e6e6e6", pal_seasonal)
+```
+
+The above weekly mapping code can be repurposed to produce seasonal abundance maps.
+
+```{r seaonsal-map, fig.height = 10}
+par(mar = c(0.25, 0.25, 1, 0.25), mfrow = c(2, 1))
+
+# breeding map
+# add land background/area of no prediction
+plot(ne_land, col = "#cfcfcf", border = FALSE,
+     main = "Relative Abundance, Breeding", cex.main = 1,
+     xlim = c(fac_ext@xmin, fac_ext@xmax),
+     ylim = c(fac_ext@ymin, fac_ext@ymax))
+# add abundance data including predicted zeros
+plot(abd_seasonal_proj[["breeding"]], 
+     breaks = bins_seasonal, col = pal_seasonal,
+     maxpixels = ncell(abd_seasonal_proj),
+     legend = FALSE, add = TRUE)
+# country and state boundaries
+plot(ne_state_lines, col = "white", lwd = 0.7, add = TRUE)
+plot(ne_country_lines, col = "white", lwd = 1.2, add = TRUE)
+# legend
+lbl_brks <- seq(0, max(bins_seasonal), length.out = length(bins_seasonal))
+lbls_at <- c(0, quantile(lbl_brks[-1], c(0, 0.5, 1)))
+lbls <- comma(c(0, quantile(bins_seasonal[-1], c(0, 0.5, 1))), 
+              accuracy = 0.001)
+plot(abd_proj, legend.only = TRUE,
+     breaks = lbl_brks, col = pal_seasonal,
+     smallplot = c(0.86, 0.88, 0.05, 0.95),
+     axis.args = list(at = lbls_at, labels = lbls))
+
+# non-breeding map
+par(mar = c(0.25, 0.25, 1, 0.25))
+# add land background/area of no prediction
+plot(ne_land, col = "#cfcfcf", border = FALSE,
+     main = "Relative Abundance, Non-breeding", cex.main = 1,
+     xlim = c(fac_ext@xmin, fac_ext@xmax),
+     ylim = c(fac_ext@ymin, fac_ext@ymax))
+# add abundance data including predicted zeros
+plot(abd_seasonal_proj[["nonbreeding"]], 
+     breaks = bins_seasonal, col = pal_seasonal,
+     maxpixels = ncell(abd_seasonal_proj),
+     legend = FALSE, add = TRUE)
+# country and state boundaries
+plot(ne_state_lines, col = "white", lwd = 0.7, add = TRUE)
+plot(ne_country_lines, col = "white", lwd = 1.2, add = TRUE)
+# legend
+plot(abd_proj, legend.only = TRUE,
+     breaks = lbl_brks, col = pal_seasonal,
+     smallplot = c(0.86, 0.88, 0.05, 0.95),
      axis.args = list(at = lbls_at, labels = lbls))
 ```
