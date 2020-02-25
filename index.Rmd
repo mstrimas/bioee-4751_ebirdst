@@ -1,7 +1,9 @@
 ---
 title: "BIOEE 4751: eBird Status & Trends"
 author: Matt Strimas-Mackey & Tom Auer
-output: html_document
+output: 
+  html_document:
+    theme: default
 editor_options: 
   chunk_output_type: console
 ---
@@ -34,6 +36,8 @@ remotes::install_github(c("CornellLabofOrnithology/ebirdst",
                           "ropensci/rnaturalearthdata"))
 ```
 
+To get started with this lab, open up RStudio and create a new project from the File menu. This will create a new directory on your commputer in which will contain your code and data for this project. Create a new R script (File > New File) to contain all the code in this lab and save it in your project directory. Finally, download [this file of GIS data](https://github.com/mstrimas/bioee-4751_ebirdst/raw/master/data/gis-data.gpkg), which contains some contextual gis layers that we'll use when making maps. Place this file in a `data/` subdirectory of your project.
+
 ## Download data
 
 The Status and Trends website is a great resources for exploring patterns of bird movement throughout North America, but if we want to make custom visualizations or perform analyses we'll need to access the data underlying the Status and Trends products. Fortunately, all this raw data is stored in the cloud on the [Amazon Web Services Registry of Open Data](https://registry.opendata.aws/ebirdst/) and the R package `ebirdst` gives you access to these data. To see a list of all the species available through `ebirdst` you can explore the `ebirdst_runs` data frame. Before doing so, we'll need to attach the add on R packages that we'll be using throughout this lab using the `library()` command.
@@ -41,7 +45,6 @@ The Status and Trends website is a great resources for exploring patterns of bir
 ```{r dl-runs}
 library(raster)
 library(sf)
-library(rnaturalearth)
 library(dplyr)
 library(scales)
 library(ebirdst)
@@ -143,6 +146,12 @@ abd_proj <- abd[[week_index]] %>%
 
 # determine non-zero extent for the focal week
 week_ext <- calc_full_extent(occ_proj)
+# generate a spatial polygon of the extent
+week_ext_sf <- week_ext %>% 
+  as("SpatialPolygons") %>% 
+  st_as_sf() %>% 
+  st_set_crs(proj) %>% 
+  st_geometry()
 
 # calculate quantile bins
 occ_bins <- calc_bins(occ_proj, method = "quantile")$bins
@@ -184,36 +193,36 @@ plot(abd_proj,
      axes = FALSE, box = FALSE)
 ```
 
-Looks great! The final step is to add some contextual information: state borders, country borders, and a background layer showing the land to show regions where no prediction was made. We can get all these layers from [Natural Earth](https://www.naturalearthdata.com/), which provides excellent free GIS data, via the R package `rnaturalearth`. Unlike the Status and Trends data, which is in raster format, these borders are in the form of spatial lines and polygons, which we can work with using the `sf` package in R. Let's load these data now. There's some processing of these spatial layers below that may look cryptic if you're not familiar with the `sf` package, don't worry too much about the details. If you are interested in working with spatial data in R, the free online book [Geocomputation with R](https://bookdown.org/robinlovelace/geocompr/) is an excellent resources.
+Looks great! The final step is to add some contextual information: state borders, country borders, and a background layer showing the land to show regions where no prediction was made. We can get all these layers from [Natural Earth](https://www.naturalearthdata.com/). These layers can be downloaded with the the R package `rnaturalearth`; however, for this lab we've put these [layers in a GeoPackage file](https://github.com/mstrimas/bioee-4751_ebirdst/raw/master/data/gis-data.gpkg) for easy acess. Unlike the Status and Trends data, which is in raster format, these borders are in the form of spatial lines and polygons, which we can work with using the `sf` package in R. Let's load these data now. If you're interested in working with spatial data in R, the free online book [Geocomputation with R](https://bookdown.org/robinlovelace/geocompr/) is an excellent resources.
+
+The GIS data are provided for the whole earth and we'll need to crop them to the non-zero extent prior to transforming them to the species-specific, custom projection.
 
 ```{r abdocc-ne, results = "hide"}
-# north american land boundary
-ne_land <- ne_countries(scale = 50, returnclass = "sf") %>% 
-  filter(continent == "North America") %>% 
-  # combine all countries together
-  st_set_precision(1e6) %>%
-  st_union()
+f_gis <- "data/gis-data.gpkg"
+# create a polygon to crop the gis data to
+week_ext_ll <- week_ext_sf %>% 
+  # buffer by 1000 km
+  st_buffer(1e6) %>% 
+  # tranform to lat-lon to match gis layers
+  st_transform(crs = 4326)
+
+# western hemisphere land boundary
+ne_land <- read_sf(f_gis, "ne_land") %>% 
+  # crop to non-zero extent
+  st_intersection(week_ext_ll) %>% 
+  # transform to custom projection
+  st_transform(crs = proj) %>% 
+  st_geometry()
 
 # country lines
-ne_country_lines <- ne_download(scale = 50, category = "cultural",
-                                type = "admin_0_boundary_lines_land",
-                                returnclass = "sf")
-# subset to only retain the lines within north america
-in_na <- as.logical(st_intersects(ne_country_lines, ne_land, sparse = FALSE))
-ne_country_lines <- ne_country_lines[in_na, ]
+ne_country_lines <- read_sf(f_gis, "ne_country_lines") %>% 
+  st_intersection(week_ext_ll) %>% 
+  st_transform(crs = proj)
 
 # state lines
-ne_state_lines <- ne_download(scale = 50, category = "cultural",
-                              type = "admin_1_states_provinces_lines",
-                              returnclass = "sf")
-# subset to only retain the lines within north america
-in_na <- as.logical(st_intersects(ne_state_lines, ne_land, sparse = FALSE))
-ne_state_lines <- ne_state_lines[in_na, ]
-
-# project to match rasters
-ne_land <- st_transform(ne_land, crs = proj)
-ne_country_lines <- st_transform(ne_country_lines, crs = proj)
-ne_state_lines <- st_transform(ne_state_lines, crs = proj)
+ne_state_lines <- read_sf(f_gis, "ne_state_lines") %>% 
+  st_intersection(week_ext_ll) %>% 
+  st_transform(crs = proj)
 ```
 
 Now we can make the final maps, building up the different components in layers with multiple calls to `plot()`. At this stage we'll make occurrence and abundance maps so we can compare them. You'll notice there's some additional code below to produce legends, this is necessary because we're using quantile bins and we just wnat to show the minimum, maximum, and midpoint on the color bar.
@@ -224,11 +233,11 @@ par(mar = c(0.25, 0.25, 2, 0.25), mfrow = c(2, 1))
 # abundance map
 title <- paste0(species, ", ", format(week_date, "%b %d"), "\n",
                 "Relative Abundance")
-# creat a blank plot
-plot(week_ext, col = NA, axes = FALSE,
-     main = title, cex.main = 1)
 # add land background/area of no prediction
-plot(ne_land, col = "#cfcfcf", border = NA, add = TRUE)
+plot(ne_land, col = "#cfcfcf", border = FALSE,
+     main = title, cex.main = 1,
+     xlim = c(week_ext@xmin, week_ext@xmax),
+     ylim = c(week_ext@ymin, week_ext@ymax))
 # add abundance data including predicted zeros
 plot(abd_proj, 
      breaks = abd_bins_z, col = pal_z,
@@ -237,7 +246,6 @@ plot(abd_proj,
 # country and state boundaries
 plot(ne_state_lines, col = "white", lwd = 0.7, add = TRUE)
 plot(ne_country_lines, col = "white", lwd = 1.2, add = TRUE)
-
 # legend
 lbl_brks <- seq(0, max(abd_bins), length.out = length(abd_bins_z))
 lbls_at <- c(0, quantile(lbl_brks[-1], c(0, 0.5, 1)))
@@ -248,11 +256,11 @@ plot(abd_proj, legend.only = TRUE,
      axis.args = list(at = lbls_at, labels = lbls))
 
 # occurrence map
-# creat a blank plot
-plot(week_ext, col = NA, axes = FALSE,
-     main = "Ocurrence", cex.main = 1)
 # add land background/area of no prediction
-plot(ne_land, col = "#cfcfcf", border = NA, add = TRUE)
+plot(ne_land, col = "#cfcfcf", border = FALSE,
+     main = "Occurrence", cex.main = 1,
+     xlim = c(week_ext@xmin, week_ext@xmax),
+     ylim = c(week_ext@ymin, week_ext@ymax))
 # add occurrence data including predicted zeros
 plot(occ_proj, 
      breaks = occ_bins_z, col = pal_z,
@@ -261,7 +269,6 @@ plot(occ_proj,
 # country and state boundaries
 plot(ne_state_lines, col = "white", lwd = 0.7, add = TRUE)
 plot(ne_country_lines, col = "white", lwd = 1.2, add = TRUE)
-
 # legend
 lbl_brks <- seq(0, max(occ_bins), length.out = length(occ_bins_z))
 lbls_at <- c(0, quantile(lbl_brks[-1], c(0, 0.5, 1)))
