@@ -34,7 +34,7 @@ install.packages("remotes")
 remotes::install_github("CornellLabofOrnithology/ebirdst")
 ```
 
-To get started with this lab, open up RStudio and create a new project from the File menu. This will create a new directory on your commputer in which will contain your code and data for this project. Create a new R script (File > New File) to contain all the code in this lab and save it in your project directory. Finally, download [this file of GIS data](https://github.com/mstrimas/bioee-4751_ebirdst/raw/master/data/gis-data.gpkg), which contains some contextual gis layers that we'll use when making maps. Place this file in a `data/` subdirectory of your project.
+To get started with this lab, open up RStudio and create a new project from the File menu. This will create a new directory on your computer in which will contain your code and data for this project. Create a new R script (File > New File) to contain all the code in this lab and save it in your project directory. Finally, download [this file of GIS data](https://github.com/mstrimas/bioee-4751_ebirdst/raw/master/data/gis-data.gpkg), which contains some contextual GIS layers that we'll use when making maps. Place this file in a `data/` sub-directory of your project.
 
 ## Download data
 
@@ -51,7 +51,7 @@ library(ebirdst)
 glimpse(ebirdst_runs)
 ```
 
-You can run `View(ebirdst_runs)` to explore this table interacticely within RStudio. The function `ebirdst_download()` downloads data for a single species; all you need to provide is the name of the species. 
+You can run `View(ebirdst_runs)` to explore this table interactively within RStudio. The function `ebirdst_download()` downloads data for a single species; all you need to provide is the name of the species. 
 
 ```{r dl-dl, eval = FALSE}
 species <- "Baltimore Oriole"
@@ -71,7 +71,7 @@ Let's use `list.files()` to see what files were downloaded:
 list.files(dl_path, recursive = TRUE)
 ```
 
-Notice that most of these files end in `.tif`. These are GeoTIFFs, which is the most widespread format for storing spatial raster data, i.e. where space is divided up into a regular grid of cells each of which is assigned some quantity such as abundance. The [`ebirdst` website](https://cornelllabofornithology.github.io/ebirdst/articles/ebirdst-introduction.html#raster-layer-description) contains a desciption of what data each of the files contains.
+Notice that most of these files end in `.tif`. These are GeoTIFFs, which is the most widespread format for storing spatial raster data, i.e. where space is divided up into a regular grid of cells each of which is assigned some quantity such as abundance. The [`ebirdst` website](https://cornelllabofornithology.github.io/ebirdst/articles/ebirdst-introduction.html#raster-layer-description) contains a description of what data each of the files contains.
 
 ## Loading data into R
 
@@ -124,7 +124,7 @@ Ok, so we have a map, but it's not very useful. It's clear that to make a good m
 
 1. All Status and Trends data are provided for the whole Western Hemisphere, but for any given week most of the mapped area will be have a predicted occurrence of zero (light grey on the above map). The `ebirdst` function `calc_full_extent()` calculates the extent of the non-zero data, which we can then use to focus our maps.
 2. You may notice the shape of the continents in the above map looks a little "weird". That's because the Status and Trends data are provided in the sinusoidal equal area [projection](https://en.wikipedia.org/wiki/Map_projection) used by the underlying environmental predictor data. This projection is valid for the whole globe and for most analytical uses it functions well; however, it's heavily distorted and when producing maps there are much better options. Fortunately, as part of the Status and Trends process an optimal projection for mapping each species is calculated and made available through the function `load_fac_map_parameters()`.
-3. By default, `plot()` assigns colors to the data using linear bins; however, the abundance data in particular is heavily left skewed, and linear bins usually result is a loss of resoluton in the pattern of abundance. Quantile bins, which each have an equal number of observations, are typically a much better choice than linear bins, which are all of equal size. The `ebirdst` function `calc_bins()` calculates quantile bins for Status and Trends data.
+3. By default, `plot()` assigns colors to the data using linear bins; however, the abundance data in particular is heavily left skewed, and linear bins usually result is a loss of resolution in the pattern of abundance. Quantile bins, which each have an equal number of observations, are typically a much better choice than linear bins, which are all of equal size. The `ebirdst` function `calc_bins()` calculates quantile bins for Status and Trends data.
 
 The following code performs these data preparation steps.
 
@@ -192,7 +192,7 @@ plot(abd_proj,
      axes = FALSE, box = FALSE)
 ```
 
-Looks great! The final step is to add some contextual information: state borders, country borders, and a background layer showing the land to show regions where no prediction was made. We can get all these layers from [Natural Earth](https://www.naturalearthdata.com/). These layers can be downloaded with the the R package `rnaturalearth`; however, for this lab we've put these [layers in a GeoPackage file](https://github.com/mstrimas/bioee-4751_ebirdst/raw/master/data/gis-data.gpkg) for easy acess. Unlike the Status and Trends data, which is in raster format, these borders are in the form of spatial lines and polygons, which we can work with using the `sf` package in R. Let's load these data now. If you're interested in working with spatial data in R, the free online book [Geocomputation with R](https://bookdown.org/robinlovelace/geocompr/) is an excellent resources.
+Looks great! The final step is to add some contextual information: state borders, country borders, and a background layer showing the land to show regions where no prediction was made. We can get all these layers from [Natural Earth](https://www.naturalearthdata.com/). These layers can be downloaded with the the R package `rnaturalearth`; however, for this lab we've put these [layers in a GeoPackage file](https://github.com/mstrimas/bioee-4751_ebirdst/raw/master/data/gis-data.gpkg) for easy access. Unlike the Status and Trends data, which is in raster format, these borders are in the form of spatial lines and polygons, which we can work with using the `sf` package in R. Let's load these data now. If you're interested in working with spatial data in R, the free online book [Geocomputation with R](https://bookdown.org/robinlovelace/geocompr/) is an excellent resources.
 
 The GIS data are provided for the whole earth and we'll need to crop them to the non-zero extent prior to transforming them to the species-specific, custom projection.
 
@@ -223,7 +223,7 @@ ne_state_lines <- read_sf(f_gis, "ne_state_lines") %>%
   st_transform(crs = proj)
 ```
 
-Now we can make the final maps, building up the different components in layers with multiple calls to `plot()`. At this stage we'll make occurrence and abundance maps so we can compare them. You'll notice there's some additional code below to produce legends, this is necessary because we're using quantile bins and we just wnat to show the minimum, maximum, and midpoint on the color bar.
+Now we can make the final maps, building up the different components in layers with multiple calls to `plot()`. At this stage we'll make occurrence and abundance maps so we can compare them. You'll notice there's some additional code below to produce legends, this is necessary because we're using quantile bins and we just want to show the minimum, maximum, and midpoint on the color bar.
 
 ```{r abdocc-final, fig.height = 10}
 par(mar = c(0.25, 0.25, 2, 0.25), mfrow = c(2, 1))
@@ -282,7 +282,7 @@ plot(occ_proj, legend.only = TRUE,
 
 The above maps visualize a single week of data across the whole range of the species. Alternatively, we can visualize all 52 weeks of data for a single location to examine the phenology of this species. We often call these plots *trajectories*, and they show how abundance changes over the course of the year at a location.
 
-For this example, we'll take Cornell campus (42.448 N, 76.483 W) as our location of interest. We need to convert the latitude and longitude to spatial features, then we can use the `extract()` function from `raster` to extract the the values for all the weeks from the raster layers at the given point. Finally, we're going to use some new data that we haven't worked with before: the upper and lower confidence limits on the abudance estimates. Specifically, `abundance_lower` and `abundance_upper` are the 10th and 90th quantile of the expected relative abundance estimates, respectively. This will give us a sense of the uncertainty in the abundance estimates.
+For this example, we'll take Cornell campus (42.448 N, 76.483 W) as our location of interest. We need to convert the latitude and longitude to spatial features, then we can use the `extract()` function from `raster` to extract the the values for all the weeks from the raster layers at the given point. Finally, we're going to use some new data that we haven't worked with before: the upper and lower confidence limits on the abundance estimates. Specifically, `abundance_lower` and `abundance_upper` are the 10th and 90th quantile of the expected relative abundance estimates, respectively. This will give us a sense of the uncertainty in the abundance estimates.
 
 ```{r traj-extract}
 # create a point for cornell campus
@@ -340,7 +340,7 @@ pal_seasonal <- abundance_palette(n = length(bins_seasonal) - 1)
 pal_seasonal <- c("#e6e6e6", pal_seasonal)
 ```
 
-The above weekly mapping code can be repurposed to produce seasonal abundance maps.
+The above weekly mapping code can be re-purposed to produce seasonal abundance maps.
 
 ```{r seaonsal-map, fig.height = 10}
 par(mar = c(0.25, 0.25, 1, 0.25), mfrow = c(2, 1))
