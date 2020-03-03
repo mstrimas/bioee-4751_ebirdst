@@ -296,7 +296,7 @@ pt <- st_point(c(-76.483, 42.448)) %>%
 abd_lower <- load_raster("abundance_lower", dl_path)
 abd_upper <- load_raster("abundance_upper", dl_path)
 
-# extract weeekly occurrence and abundance values
+# extract weekly occurrence and abundance values
 abd_traj <- extract(abd, pt)[1, ]
 lower_traj <- extract(abd_lower, pt)[1, ]
 upper_traj <- extract(abd_upper, pt)[1, ]
@@ -326,10 +326,11 @@ For the final exercise, we'll map relative abundance during the breeding and non
 
 ```{r seasonal-prep}
 # project layers
-abd_seasonal_proj <- abd_seasonal[[c("breeding", "nonbreeding")]] %>% 
+seasons <- c("breeding", "nonbreeding")
+abd_seasonal_proj <- abd_seasonal[[seasons]] %>% 
   crop(map_pars$fa_extent_sinu + 2e6) %>% 
-  projectRaster(crs = proj, method = "ngb")
-
+  projectRaster(crs = proj, method = "ngb") %>% 
+  setNames(seasons)
 # get precalculated bins from load_fac_map_parameters()
 bins_seasonal <- map_pars$abundance_bins
 # add zero to show it in grey
